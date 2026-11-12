@@ -4,8 +4,11 @@
 //
 //  Created by s s on 2025/3/14.
 //
-//  Fork doctoralvarez/GetMoreRam — version 1.3.0 (2026-11-12)
+//  Fork doctoralvarez/GetMoreRam — version 1.3.1 (2026-11-12)
 //  Changelog:
+//   - 1.3.1 (2026-11-12): "Fetch Headers from the Server" (the server's own
+//     Client Info and User Agent, as SideStore does for -80045); footer explains
+//     what to try for -80045.
 //   - 1.3.0 (2026-11-12): Authentication: the anisette server is chosen from
 //     SideStore's list (with a reachability test and a refresh) or typed; a
 //     Client picker sets the headers (Windows / iTunes, SideStore macOS,
@@ -32,6 +35,7 @@ struct SettingsView: View {
     @State private var isImportingSideStoreAccount = false
     /* fork: anisette server list and client profiles */
     @State private var serverPickerShow = false
+    @State private var fetchingHeaders = false
     private let customProfileID = "custom"
 
     private var currentServerName: String {
@@ -121,6 +125,12 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                /* fork: the server's own headers (SideStore's "Fetch / Save as Overrides") */
+                Button(fetchingHeaders ? "Fetching…" : "Fetch Headers from the Server") {
+                    Task { await fetchHeadersFromServer() }
+                }
+                .disabled(fetchingHeaders)
+
                 DisclosureGroup("Headers (Client Info, User Agent)") {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Client Info").font(.caption).foregroundStyle(.secondary)
@@ -142,7 +152,7 @@ struct SettingsView: View {
             } header: {
                 Text("Authentication")
             } footer: {
-                Text("Used for anisette provisioning, Apple ID sign-in and two-factor verification. If sign-in fails (GrandSlam, 403, 503), try another server first, then another client. To change them while signed in, sign out (Clean Up Keychain) and sign in again.")
+                Text("Used for anisette provisioning, Apple ID sign-in and two-factor verification. If sign-in fails (GrandSlam, 403, 503), try another server first, then another client. For -80045 (\"This action cannot be completed at this time\"): choose SideStore (New), tap Fetch Headers from the Server, tap Clean Up Keychain, reopen the app and sign in once. Apple may also need some hours before it accepts the account again.")
             }
             .disabled(viewModel.isLoginInProgress || sharedModel.isLogin)
             
@@ -321,6 +331,22 @@ struct SettingsView: View {
         return viewModel.isLoginInProgress
     }
     
+    /// Fills Client Info and User Agent with the ones the chosen server uses
+    func fetchHeadersFromServer() async {
+        fetchingHeaders = true
+        defer { fetchingHeaders = false }
+        do {
+            let headers = try await AnisettePresets.fetchClientInfo(sharedModel.anisetteServerURL)
+            sharedModel.authenticationClientInfo = headers.clientInfo
+            sharedModel.authenticationUserAgent = headers.userAgent
+            importResultInfo = "Headers from the server:\n\(headers.clientInfo)\n\(headers.userAgent)\n\nTap Clean Up Keychain, reopen the app and sign in again."
+            importResultShow = true
+        } catch {
+            errorInfo = error.detailedDescription
+            errorShow = true
+        }
+    }
+
     func cleanUp() {
         Keychain.shared.adiPb = nil
         Keychain.shared.identifier = nil

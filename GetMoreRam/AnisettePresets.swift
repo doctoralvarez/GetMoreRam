@@ -2,8 +2,13 @@
 //  AnisettePresets.swift
 //  GetMoreRam
 //
-//  Fork doctoralvarez/GetMoreRam — version 1.3.0 (2026-11-12)
+//  Fork doctoralvarez/GetMoreRam — version 1.3.1 (2026-11-12)
 //  Changelog:
+//   - 1.3.1 (2026-11-12): against Apple's -80045 ("This action cannot be
+//     completed at this time"): "SideStore (New)" first in the list (the server
+//     SideStore users report for it), and fetchClientInfo(_:) reads the
+//     headers a server itself uses (/v3/client_info), like SideStore's
+//     "Fetch / Save as Overrides".
 //   - 1.3.0 (2026-11-12): preset anisette servers (SideStore's official list,
 //     built in and refreshable from servers.sidestore.io), client profiles
 //     (Windows / iTunes, SideStore macOS, Mac / Xcode, custom) and a server
@@ -31,11 +36,11 @@ struct AuthenticationClientProfile: Identifiable, Hashable {
 enum AnisettePresets {
     /// SideStore's official list (servers.sidestore.io/servers.json, November 2026)
     static let builtInServers: [AnisetteServerPreset] = [
+        AnisetteServerPreset(name: "SideStore (New)", address: "https://new.ani.sidestore.io"),
         AnisetteServerPreset(name: "SideStore", address: "https://ani.sidestore.io"),
         AnisetteServerPreset(name: "SideStore (.app)", address: "https://ani.sidestore.app"),
         AnisetteServerPreset(name: "SideStore (.zip)", address: "https://ani.sidestore.zip"),
         AnisetteServerPreset(name: "SideStore (.xyz)", address: "https://ani.846969.xyz"),
-        AnisetteServerPreset(name: "SideStore (New)", address: "https://new.ani.sidestore.io"),
         AnisetteServerPreset(name: "jkcoxson", address: "https://mac-ani.jkcoxson.com"),
         AnisetteServerPreset(name: "jkcoxson (Windows ADI)", address: "https://ani.jkcoxson.com"),
         AnisetteServerPreset(name: "SideStore (Windows ADI)", address: "https://win.ani.sidestore.io"),
@@ -117,6 +122,26 @@ enum AnisettePresets {
             UserDefaults.standard.set(encoded, forKey: savedListKey)
         }
         return servers
+    }
+
+    /// The Client Info and User Agent a server uses itself (anisette v3
+    /// /v3/client_info), to send the same headers to Apple
+    static func fetchClientInfo(_ address: String) async throws -> (clientInfo: String, userAgent: String) {
+        guard let base = URL(string: address.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            throw "Not a valid server address."
+        }
+        var request = URLRequest(url: base.appendingPathComponent("v3").appendingPathComponent("client_info"))
+        request.timeoutInterval = 15
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else { throw "The server answered HTTP \(status)." }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let clientInfo = json["client_info"] as? String, !clientInfo.isEmpty else {
+            throw "The server did not send its client info (not an anisette v3 server)."
+        }
+        let agent = (json["user_agent"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? AuthenticationConfiguration.defaultUserAgent
+        return (clientInfo, agent)
     }
 
     /// Result of asking one server for its client info (anisette v3)
