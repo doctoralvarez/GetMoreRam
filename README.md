@@ -1,6 +1,15 @@
 # Get More Ram
 A simple [StosSign](https://github.com/stossy11/StosSign) wrapper app that allows you to enable "Increased Memory Limit" for your sideloaded apps without using Xcode.
 
+## doctoralvarez fork — 1.3 (2026-11-12)
+
+Built on failury's 1.2 (Windows / iTunes authentication). **Settings → Authentication** adds:
+
+- **Anisette Server** picker with SideStore's official list built in (22 servers), **Download the Latest List** from `servers.sidestore.io`, **Test All** (asks every server for `/v3/client_info` and sorts them: working first, fastest first), per-row **Test** (swipe), and **Other server** for any address.
+- **Client** picker that fills the authentication headers: **Windows / iTunes** (default, as in 1.2), **macOS (SideStore 0.6+)** (`<MacBookPro18,3> <macOS;26.6;25F84> …`, AnisetteKit's default), **Mac / Xcode (AltStore classic)**, or **Custom**. The raw Client Info and User Agent stay editable under *Headers*.
+
+If sign-in fails (GrandSlam, HTTP 403 or 503), try another server first, then another client; sign out (*Clean Up Keychain*) and sign in again after changing them.
+
 ## Windows / iTunes authentication fork
 
 This fork defaults to the following SideStore configuration:

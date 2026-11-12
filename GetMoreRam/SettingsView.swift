@@ -4,6 +4,13 @@
 //
 //  Created by s s on 2025/3/14.
 //
+//  Fork doctoralvarez/GetMoreRam — version 1.3.0 (2026-11-12)
+//  Changelog:
+//   - 1.3.0 (2026-11-12): Authentication: the anisette server is chosen from
+//     SideStore's list (with a reachability test and a refresh) or typed; a
+//     Client picker sets the headers (Windows / iTunes, SideStore macOS,
+//     Mac / Xcode, or custom); the raw headers stay editable.
+//
 
 import SwiftUI
 import UniformTypeIdentifiers
@@ -23,6 +30,28 @@ struct SettingsView: View {
     @State private var importResultShow = false
     @State private var importResultInfo = ""
     @State private var isImportingSideStoreAccount = false
+    /* fork: anisette server list and client profiles */
+    @State private var serverPickerShow = false
+    private let customProfileID = "custom"
+
+    private var currentServerName: String {
+        AnisettePresets.savedServers().first(where: { $0.address == sharedModel.anisetteServerURL })?.name ?? "Custom"
+    }
+
+    /// The profile matching the saved headers; choosing one fills them in
+    private var clientProfileSelection: Binding<String> {
+        Binding(
+            get: {
+                AnisettePresets.profile(clientInfo: sharedModel.authenticationClientInfo,
+                                        userAgent: sharedModel.authenticationUserAgent)?.id ?? customProfileID
+            },
+            set: { id in
+                guard let profile = AnisettePresets.clientProfiles.first(where: { $0.id == id }) else { return }
+                sharedModel.authenticationClientInfo = profile.clientInfo
+                sharedModel.authenticationUserAgent = profile.userAgent
+            }
+        )
+    }
     
 
     var body: some View {
@@ -54,34 +83,66 @@ struct SettingsView: View {
             }
             
             Section {
-                HStack {
-                    Text("Anisette Server URL")
-                    Spacer()
-                    TextField("", text: $sharedModel.anisetteServerURL)
-                        .multilineTextAlignment(.trailing)
+                /* fork: pick a server from SideStore's list (or type one) */
+                Button {
+                    serverPickerShow = true
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Anisette Server").foregroundStyle(.primary)
+                            Text(sharedModel.anisetteServerURL)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Text(currentServerName)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Client Info").font(.caption).foregroundStyle(.secondary)
-                    TextField("Client Info", text: $sharedModel.authenticationClientInfo, axis: .vertical)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityLabel("Client Info")
+                .sheet(isPresented: $serverPickerShow) {
+                    AnisetteServerPickerView(selection: $sharedModel.anisetteServerURL)
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("User Agent").font(.caption).foregroundStyle(.secondary)
-                    TextField("User Agent", text: $sharedModel.authenticationUserAgent, axis: .vertical)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityLabel("User Agent")
+
+                /* fork: client profiles (the headers Apple sees) */
+                Picker("Client", selection: clientProfileSelection) {
+                    ForEach(AnisettePresets.clientProfiles) { profile in
+                        Text(profile.name).tag(profile.id)
+                    }
+                    Text("Custom").tag(customProfileID)
                 }
-                Button("Use Windows / iTunes Settings") {
-                    sharedModel.authenticationClientInfo = AuthenticationConfiguration.defaultClientInfo
-                    sharedModel.authenticationUserAgent = AuthenticationConfiguration.defaultUserAgent
+                if let profile = AnisettePresets.clientProfiles.first(where: { $0.id == clientProfileSelection.wrappedValue }) {
+                    Text(profile.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                DisclosureGroup("Headers (Client Info, User Agent)") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Client Info").font(.caption).foregroundStyle(.secondary)
+                        TextField("Client Info", text: $sharedModel.authenticationClientInfo, axis: .vertical)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.system(.footnote, design: .monospaced))
+                            .accessibilityLabel("Client Info")
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("User Agent").font(.caption).foregroundStyle(.secondary)
+                        TextField("User Agent", text: $sharedModel.authenticationUserAgent, axis: .vertical)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.system(.footnote, design: .monospaced))
+                            .accessibilityLabel("User Agent")
+                    }
                 }
             } header: {
                 Text("Authentication")
             } footer: {
-                Text("These saved headers are used for anisette provisioning, Apple ID sign-in, and two-factor verification. The defaults match your SideStore Windows / iTunes configuration. Sign out and sign in again to apply changes to an existing session.")
+                Text("Used for anisette provisioning, Apple ID sign-in and two-factor verification. If sign-in fails (GrandSlam, 403, 503), try another server first, then another client. To change them while signed in, sign out (Clean Up Keychain) and sign in again.")
             }
             .disabled(viewModel.isLoginInProgress || sharedModel.isLogin)
             
@@ -343,4 +404,165 @@ struct SettingsView: View {
         }
     }
     
+}
+
+// MARK: - fork: anisette server picker
+
+struct AnisetteServerPickerView: View {
+    @Binding var selection: String
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var servers: [AnisetteServerPreset] = AnisettePresets.savedServers()
+    @State private var results: [String: AnisettePresets.TestResult] = [:]
+    @State private var testing: Set<String> = []
+    @State private var custom = ""
+    @State private var refreshing = false
+    @State private var message = ""
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section {
+                    ForEach(servers) { server in
+                        serverRow(server)
+                    }
+                } header: {
+                    Text("SideStore's servers")
+                } footer: {
+                    Text(message.isEmpty ? "Tap one to use it. \"Test All\" asks each server for its anisette data and shows which answer and how fast." : message)
+                }
+
+                Section {
+                    TextField("https://", text: $custom)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("Use This Address") {
+                        let address = custom.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !address.isEmpty else { return }
+                        selection = address
+                        dismiss()
+                    }
+                    .disabled(custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                } header: {
+                    Text("Other server")
+                }
+
+                Section {
+                    Button(refreshing ? "Downloading…" : "Download the Latest List") {
+                        Task { await refreshList() }
+                    }
+                    .disabled(refreshing)
+                    Button("Use the Built-in List") {
+                        UserDefaults.standard.removeObject(forKey: AnisettePresets.savedListKey)
+                        servers = AnisettePresets.builtInServers
+                        results = [:]
+                        message = "Built-in list (\(servers.count) servers)."
+                    }
+                }
+            }
+            .navigationTitle("Anisette Server")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Test All") {
+                        Task { await testAll() }
+                    }
+                    .disabled(!testing.isEmpty)
+                }
+            }
+            .onAppear {
+                if !servers.contains(where: { $0.address == selection }) {
+                    custom = selection
+                }
+            }
+        }
+    }
+
+    private func serverRow(_ server: AnisetteServerPreset) -> some View {
+        let result = results[server.address]
+        let isTesting = testing.contains(server.address)
+        return Button {
+            selection = server.address
+            dismiss()
+        } label: {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(server.name).foregroundStyle(.primary)
+                    Text(server.address)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    if let result {
+                        Text(result.summary)
+                            .font(.caption2)
+                            .foregroundStyle(result.ok ? Color.green : Color.red)
+                    }
+                }
+                Spacer()
+                if isTesting {
+                    ProgressView()
+                } else if server.address == selection {
+                    Image(systemName: "checkmark").foregroundStyle(Color.accentColor)
+                }
+            }
+        }
+        .swipeActions(edge: .trailing) {
+            Button("Test") {
+                Task { await test(server.address) }
+            }
+            .tint(.blue)
+        }
+    }
+
+    private func test(_ address: String) async {
+        testing.insert(address)
+        let result = await AnisettePresets.test(address)
+        results[address] = result
+        testing.remove(address)
+    }
+
+    private func testAll() async {
+        let addresses = servers.map(\.address)
+        for address in addresses { testing.insert(address) }
+        await withTaskGroup(of: (String, AnisettePresets.TestResult).self) { group in
+            for address in addresses {
+                group.addTask { (address, await AnisettePresets.test(address)) }
+            }
+            for await (address, result) in group {
+                results[address] = result
+                testing.remove(address)
+            }
+        }
+        let working = results.values.filter(\.ok).count
+        message = "\(working) of \(addresses.count) servers answered."
+        /* the ones that answered first, fastest first */
+        servers.sort { first, second in
+            let a = results[first.address]
+            let b = results[second.address]
+            if (a?.ok ?? false) != (b?.ok ?? false) { return a?.ok ?? false }
+            return milliseconds(a) < milliseconds(b)
+        }
+    }
+
+    private func milliseconds(_ result: AnisettePresets.TestResult?) -> Int {
+        guard let summary = result?.summary,
+              let range = summary.range(of: #"(\d+) ms"#, options: .regularExpression) else { return Int.max }
+        return Int(summary[range].replacingOccurrences(of: " ms", with: "")) ?? Int.max
+    }
+
+    private func refreshList() async {
+        refreshing = true
+        defer { refreshing = false }
+        do {
+            servers = try await AnisettePresets.refreshServers()
+            results = [:]
+            message = "Downloaded \(servers.count) servers from servers.sidestore.io."
+        } catch {
+            message = "Could not download the list: \(error.localizedDescription). The saved list stays."
+        }
+    }
 }
