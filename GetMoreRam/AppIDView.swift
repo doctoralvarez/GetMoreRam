@@ -4,8 +4,12 @@
 //
 //  Created by s s on 2025/3/15.
 //
-//  Fork doctoralvarez/GetMoreRam — version 1.4.0 (2026-11-12)
+//  Fork doctoralvarez/GetMoreRam — version 1.5.0 (2026-11-12)
 //  Changelog:
+//   - 1.5.0 (2026-11-12): each App ID in the list shows two icons, green when
+//     Apple has the capability on and red when not (gray: not read): memory
+//     chip = Increased Memory Limit, arrows = Extended Virtual Addressing; the
+//     App ID screen shows them too.
 //   - 1.4.0 (2026-11-12): "Add Extended Virtual Addressing" button.
 //
 import SwiftUI
@@ -37,6 +41,17 @@ struct AppIDEditView : View {
                 Text("Extended Virtual Addressing is requested together with Increased Memory Limit, so the memory limit stays. Apple may refuse it for free accounts; the response below says.")
             }
             
+            Section {
+                CapabilityStatusRow(title: "Increased Memory Limit", systemImage: "memorychip", state: viewModel.memoryLimit)
+                CapabilityStatusRow(title: "Extended Virtual Addressing", systemImage: "arrow.up.left.and.arrow.down.right", state: viewModel.virtualAddressing)
+                Button("Check Again") {
+                    Task { await viewModel.checkCapabilities() }
+                }
+                .disabled(viewModel.isChecking || viewModel.isUpdating)
+            } header: {
+                Text("On Apple's Server")
+            }
+
             Section {
                 Text(viewModel.result)
                     .font(.system(.subheadline, design: .monospaced))
@@ -90,11 +105,13 @@ struct AppIDView : View {
                         NavigationLink {
                             AppIDEditView(viewModel: appID)
                         } label: {
-                            Text(appID.bundleID)
+                            AppIDRow(viewModel: appID)
                         }
                     }
                 } header: {
                     Text("App IDs")
+                } footer: {
+                    Text("Green: Apple has it on for that App ID. Red: not on. Gray: could not be read. Memory chip = Increased Memory Limit, arrows = Extended Virtual Addressing. Once both you want are green, refresh or reinstall that app in SideStore.")
                 }
                 
                 Section {
@@ -119,6 +136,63 @@ struct AppIDView : View {
         } catch {
             errorInfo = error.detailedDescription
             errorShow = true
+        }
+    }
+}
+
+
+// MARK: - fork 1.5: capability icons
+
+private func capabilityColor(_ state: CapabilityState) -> Color {
+    switch state {
+    case .on: return .green
+    case .off: return .red
+    case .unknown: return .gray
+    }
+}
+
+private func capabilityText(_ state: CapabilityState) -> String {
+    switch state {
+    case .on: return "On"
+    case .off: return "Off"
+    case .unknown: return "Not read"
+    }
+}
+
+struct AppIDRow: View {
+    @ObservedObject var viewModel: AppIDModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(viewModel.bundleID)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 8)
+            if viewModel.isChecking {
+                ProgressView()
+            } else {
+                Image(systemName: "memorychip.fill")
+                    .foregroundStyle(capabilityColor(viewModel.memoryLimit))
+                    .accessibilityLabel("Increased Memory Limit: \(capabilityText(viewModel.memoryLimit))")
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .foregroundStyle(capabilityColor(viewModel.virtualAddressing))
+                    .accessibilityLabel("Extended Virtual Addressing: \(capabilityText(viewModel.virtualAddressing))")
+            }
+        }
+    }
+}
+
+struct CapabilityStatusRow: View {
+    let title: String
+    let systemImage: String
+    let state: CapabilityState
+
+    var body: some View {
+        HStack {
+            Label(title, systemImage: systemImage)
+            Spacer()
+            Text(capabilityText(state))
+                .foregroundStyle(capabilityColor(state))
         }
     }
 }

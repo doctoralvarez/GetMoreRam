@@ -4,8 +4,12 @@
 //
 //  Created by s s on 2025/3/15.
 //
-//  Fork doctoralvarez/GetMoreRam — version 1.4.0 (2026-11-12)
+//  Fork doctoralvarez/GetMoreRam — version 1.5.0 (2026-11-12)
 //  Changelog:
+//   - 1.5.0 (2026-11-12): after Refresh, each App ID reads its capabilities on
+//     Apple's server (v1 bundleIds/{id}?include=bundleIdCapabilities) and shows
+//     whether Increased Memory Limit and Extended Virtual Addressing are on;
+//     re-read after a request.
 //   - 1.4.0 (2026-11-12): Extended Virtual Addressing (EXTENDED_VIRTUAL_ADDRESSING),
 //     requested together with Increased Memory Limit so the one granted before
 //     stays; both requests share one function.
@@ -28,6 +32,10 @@ class AppIDModel : ObservableObject, Hashable {
     @Published var bundleID: String
     @Published var result: String = ""
     @Published var isUpdating = false
+    /* fork 1.5: what Apple's server says this App ID has */
+    @Published var memoryLimit: CapabilityState = .unknown
+    @Published var virtualAddressing: CapabilityState = .unknown
+    @Published var isChecking = false
     
     init(appID: AppID) {
         self.appID = appID
@@ -62,13 +70,85 @@ class AppIDModel : ObservableObject, Hashable {
             session.anisetteData = try await AnisetteDataHelper.shared.getAnisetteData(refresh: true)
             result = "Requesting \(name) for \(bundleID)..."
             _ = try await AppleAPI.shared.updateAppID(appID, capabilities: capabilities, team: team, session: session)
+            await checkCapabilities()
             result = "Apple accepted the \(name) request for:\n\(bundleID)\n\nRefresh or reinstall the app in SideStore to obtain a new provisioning profile, then check the entitlements inside the app. The entitlement in the installed app and the resulting memory limit have not been verified."
         } catch {
             result = "Capability update could not be confirmed:\n\(error.detailedDescription)"
+            await checkCapabilities()
             throw error
         }
     }
     
+    /// Reads which capabilities Apple has for this App ID
+    @MainActor
+    func checkCapabilities() async {
+        guard let team = DataManager.shared.model.team, let session = DataManager.shared.model.session else { return }
+        isChecking = true
+        defer { isChecking = false }
+        do {
+            let enabled = try await CapabilityReader.enabledCapabilities(of: appID, team: team, session: session)
+            memoryLimit = enabled.contains("INCREASED_MEMORY_LIMIT") ? .on : .off
+            virtualAddressing = enabled.contains("EXTENDED_VIRTUAL_ADDRESSING") ? .on : .off
+        } catch {
+            memoryLimit = .unknown
+            virtualAddressing = .unknown
+        }
+    }
+}
+
+/// fork 1.5: on (green), off (red) or not read (gray)
+enum CapabilityState {
+    case on, off, unknown
+}
+
+/// fork 1.5: the capabilities of one App ID, from Apple's Developer Services
+enum CapabilityReader {
+    static let known: [String] = ["INCREASED_MEMORY_LIMIT", "EXTENDED_VIRTUAL_ADDRESSING"]
+
+    static func enabledCapabilities(of appID: AppID, team: Team, session: AppleAPISession) async throws -> Set<String> {
+        let url = AppleAPI.shared.v1URL.appendingPathComponent("bundleIds").appendingPathComponent(appID.identifier)
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let response = try await AppleAPI.shared.sendServicesRequest(originalRequest: request,
+                                                                     additionalParameters: ["include": "bundleIdCapabilities"],
+                                                                     session: session, team: team)
+        if response["data"] == nil, response["errors"] != nil || response["error"] != nil {
+            throw "Apple did not return the App ID."
+        }
+        var found = Set<String>()
+        /* included bundleIdCapabilities: attributes.capabilityType (or the capability relationship) */
+        let included = response["included"] as? [[String: Any]] ?? []
+        for item in included {
+            let attributes = item["attributes"] as? [String: Any] ?? [:]
+            if let enabled = attributes["enabled"] as? Bool, enabled == false { continue }
+            var names: [String] = []
+            if let type = attributes["capabilityType"] as? String { names.append(type) }
+            if let relationships = item["relationships"] as? [String: Any],
+               let capability = relationships["capability"] as? [String: Any],
+               let data = capability["data"] as? [String: Any],
+               let id = data["id"] as? String { names.append(id) }
+            if let id = item["id"] as? String { names.append(id) }
+            for name in names {
+                for capability in known where name == capability || name.hasSuffix("_" + capability) {
+                    found.insert(capability)
+                }
+            }
+        }
+        /* the relationship ids alone ("<bundleIdId>_<CAPABILITY>") when nothing is included */
+        if included.isEmpty,
+           let data = response["data"] as? [String: Any],
+           let relationships = data["relationships"] as? [String: Any],
+           let capabilities = relationships["bundleIdCapabilities"] as? [String: Any],
+           let list = capabilities["data"] as? [[String: Any]] {
+            for entry in list {
+                guard let id = entry["id"] as? String else { continue }
+                for capability in known where id == capability || id.hasSuffix("_" + capability) {
+                    found.insert(capability)
+                }
+            }
+        }
+        return found
+    }
 }
 
 class AppIDViewModel : ObservableObject {
@@ -87,6 +167,10 @@ class AppIDViewModel : ObservableObject {
             for id in ids {
                 appIDs.append(AppIDModel(appID: id))
             }
+        }
+        /* fork 1.5: what Apple has for each one (one after another, to stay gentle) */
+        for model in appIDs {
+            await model.checkCapabilities()
         }
     }
 }
