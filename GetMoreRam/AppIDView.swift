@@ -4,8 +4,10 @@
 //
 //  Created by s s on 2025/3/15.
 //
-//  Fork doctoralvarez/GetMoreRam — version 1.5.0 (2026-11-12)
+//  Fork doctoralvarez/GetMoreRam — version 1.6.0 (2026-11-12)
 //  Changelog:
+//   - 1.6.0 (2026-11-12): Push Notifications and iCloud buttons and status
+//     (bell and cloud icons in the list).
 //   - 1.5.0 (2026-11-12): each App ID in the list shows two icons, green when
 //     Apple has the capability on and red when not (gray: not read): memory
 //     chip = Increased Memory Limit, arrows = Extended Virtual Addressing; the
@@ -36,14 +38,29 @@ struct AppIDEditView : View {
                     Text("Add Extended Virtual Addressing")
                 }
                 .disabled(viewModel.isUpdating)
+                /* fork 1.6 */
+                Button {
+                    Task { await run { try await viewModel.addPushNotifications() } }
+                } label: {
+                    Text("Add Push Notifications")
+                }
+                .disabled(viewModel.isUpdating)
+                Button {
+                    Task { await run { try await viewModel.addICloud() } }
+                } label: {
+                    Text("Add iCloud")
+                }
+                .disabled(viewModel.isUpdating)
                 if viewModel.isUpdating { ProgressView("Updating capability…") }
             } footer: {
-                Text("Extended Virtual Addressing is requested together with Increased Memory Limit, so the memory limit stays. Apple may refuse it for free accounts; the response below says.")
+                Text("Each request keeps what the App ID already has. Extended Virtual Addressing, Push Notifications and iCloud need a paid developer account; Apple says so below if not. The app itself must also ask for the entitlement, or the signer leaves it out.")
             }
             
             Section {
                 CapabilityStatusRow(title: "Increased Memory Limit", systemImage: "memorychip", state: viewModel.memoryLimit)
                 CapabilityStatusRow(title: "Extended Virtual Addressing", systemImage: "arrow.up.left.and.arrow.down.right", state: viewModel.virtualAddressing)
+                CapabilityStatusRow(title: "Push Notifications", systemImage: "bell.badge", state: viewModel.pushNotifications)
+                CapabilityStatusRow(title: "iCloud", systemImage: "icloud", state: viewModel.iCloud)
                 Button("Check Again") {
                     Task { await viewModel.checkCapabilities() }
                 }
@@ -70,6 +87,15 @@ struct AppIDEditView : View {
         .navigationBarTitleDisplayMode(.inline)
     }
     
+    func run(_ action: () async throws -> Void) async {
+        do {
+            try await action()
+        } catch {
+            errorInfo = error.detailedDescription
+            errorShow = true
+        }
+    }
+
     func addExtendedVirtualAddressing() async {
         do {
             try await viewModel.addExtendedVirtualAddressing()
@@ -111,7 +137,7 @@ struct AppIDView : View {
                 } header: {
                     Text("App IDs")
                 } footer: {
-                    Text("Green: Apple has it on for that App ID. Red: not on. Gray: could not be read. Memory chip = Increased Memory Limit, arrows = Extended Virtual Addressing. Once both you want are green, refresh or reinstall that app in SideStore.")
+                    Text("Green: Apple has it on for that App ID. Red: not on. Gray: could not be read. Memory chip = Increased Memory Limit, arrows = Extended Virtual Addressing, bell = Push Notifications, cloud = iCloud. Once both you want are green, refresh or reinstall that app in SideStore.")
                 }
                 
                 Section {
@@ -177,6 +203,12 @@ struct AppIDRow: View {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .foregroundStyle(capabilityColor(viewModel.virtualAddressing))
                     .accessibilityLabel("Extended Virtual Addressing: \(capabilityText(viewModel.virtualAddressing))")
+                Image(systemName: "bell.fill")
+                    .foregroundStyle(capabilityColor(viewModel.pushNotifications))
+                    .accessibilityLabel("Push Notifications: \(capabilityText(viewModel.pushNotifications))")
+                Image(systemName: "icloud.fill")
+                    .foregroundStyle(capabilityColor(viewModel.iCloud))
+                    .accessibilityLabel("iCloud: \(capabilityText(viewModel.iCloud))")
             }
         }
     }

@@ -1,7 +1,12 @@
 # Get More Ram
 A simple [StosSign](https://github.com/stossy11/StosSign) wrapper app that allows you to enable "Increased Memory Limit" for your sideloaded apps without using Xcode.
 
-## doctoralvarez fork — 1.5 (2026-11-12)
+## doctoralvarez fork — 1.6 (2026-11-12)
+
+- **Add Push Notifications** and **Add iCloud** (paid accounts), with bell and cloud status icons.
+- Every request now sends the capabilities Apple already reports for the App ID plus the new one, so nothing granted before is dropped.
+
+### 1.5
 
 - After **Refresh**, every App ID shows two icons read from Apple's server: memory chip = Increased Memory Limit, arrows = Extended Virtual Addressing (green on, red off, gray not read). The App ID screen shows them too, with **Check Again**.
 
