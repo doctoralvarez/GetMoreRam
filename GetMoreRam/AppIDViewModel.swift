@@ -4,6 +4,12 @@
 //
 //  Created by s s on 2025/3/15.
 //
+//  Fork doctoralvarez/GetMoreRam — version 1.4.0 (2026-11-12)
+//  Changelog:
+//   - 1.4.0 (2026-11-12): Extended Virtual Addressing (EXTENDED_VIRTUAL_ADDRESSING),
+//     requested together with Increased Memory Limit so the one granted before
+//     stays; both requests share one function.
+//
 import SwiftUI
 import StosSign_API
 import StosSign_Auth
@@ -30,6 +36,20 @@ class AppIDModel : ObservableObject, Hashable {
     
     @MainActor
     func addIncreasedMemory() async throws {
+        try await addCapabilities(["INCREASED_MEMORY_LIMIT"], name: "Increased Memory Limit")
+    }
+
+    /// fork 1.4: Extended Virtual Addressing. Sent together with Increased
+    /// Memory Limit: the request lists the capabilities the App ID should have,
+    /// so asking for this one alone could drop the memory limit granted before.
+    @MainActor
+    func addExtendedVirtualAddressing() async throws {
+        try await addCapabilities(["INCREASED_MEMORY_LIMIT", "EXTENDED_VIRTUAL_ADDRESSING"],
+                                  name: "Increased Memory Limit + Extended Virtual Addressing")
+    }
+
+    @MainActor
+    private func addCapabilities(_ capabilities: [String], name: String) async throws {
         guard !isUpdating else { return }
         isUpdating = true
         defer { isUpdating = false }
@@ -40,9 +60,9 @@ class AppIDModel : ObservableObject, Hashable {
         result = "Refreshing anisette before updating \(bundleID)..."
         do {
             session.anisetteData = try await AnisetteDataHelper.shared.getAnisetteData(refresh: true)
-            result = "Requesting Increased Memory Limit for \(bundleID)..."
-            _ = try await AppleAPI.shared.updateAppID(appID, capabilities: ["INCREASED_MEMORY_LIMIT"], team: team, session: session)
-            result = "Apple accepted the Increased Memory Limit request for:\n\(bundleID)\n\nRefresh/re-sign LiveContainer in SideStore to obtain a new provisioning profile. The entitlement in the installed app and the resulting memory limit have not been verified."
+            result = "Requesting \(name) for \(bundleID)..."
+            _ = try await AppleAPI.shared.updateAppID(appID, capabilities: capabilities, team: team, session: session)
+            result = "Apple accepted the \(name) request for:\n\(bundleID)\n\nRefresh or reinstall the app in SideStore to obtain a new provisioning profile, then check the entitlements inside the app. The entitlement in the installed app and the resulting memory limit have not been verified."
         } catch {
             result = "Capability update could not be confirmed:\n\(error.detailedDescription)"
             throw error

@@ -4,6 +4,10 @@
 //
 //  Created by s s on 2025/3/15.
 //
+//  Fork doctoralvarez/GetMoreRam — version 1.4.0 (2026-11-12)
+//  Changelog:
+//   - 1.4.0 (2026-11-12): "Add Extended Virtual Addressing" button.
+//
 import SwiftUI
 
 struct AppIDEditView : View {
@@ -21,7 +25,16 @@ struct AppIDEditView : View {
                     Text("Add Increased Memory Limit")
                 }
                 .disabled(viewModel.isUpdating)
+                /* fork 1.4 */
+                Button {
+                    Task { await addExtendedVirtualAddressing() }
+                } label: {
+                    Text("Add Extended Virtual Addressing")
+                }
+                .disabled(viewModel.isUpdating)
                 if viewModel.isUpdating { ProgressView("Updating capability…") }
+            } footer: {
+                Text("Extended Virtual Addressing is requested together with Increased Memory Limit, so the memory limit stays. Apple may refuse it for free accounts; the response below says.")
             }
             
             Section {
@@ -42,6 +55,15 @@ struct AppIDEditView : View {
         .navigationBarTitleDisplayMode(.inline)
     }
     
+    func addExtendedVirtualAddressing() async {
+        do {
+            try await viewModel.addExtendedVirtualAddressing()
+        } catch {
+            errorInfo = error.detailedDescription
+            errorShow = true
+        }
+    }
+
     func addIncreasedMemoryLimit() async {
         do {
             try await viewModel.addIncreasedMemory()
